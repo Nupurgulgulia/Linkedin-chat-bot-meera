@@ -47,15 +47,28 @@ ${voiceGuide}
 ${corpus}`;
 }
 
-export function draftPrompt(rawInput, { variation = false } = {}) {
+export function draftPrompt(rawInput, { variation = false, hook = null } = {}) {
   const variationNote = variation
     ? '\n\nMeera has already seen one draft from this material and wants a different version. Use a different opening and, if the material allows, a different angle. Same rules apply.'
+    : '';
+  const hookNote = hook
+    ? `
+
+A recent news article connects to this note. Use it as the post's opening, or reference it within the first two paragraphs, the way Meera would: state the specific fact flatly and name the outlet, then connect it to her point.
+
+<news_hook>
+Headline: ${hook.title}
+Source: ${hook.source}
+Published: ${hook.published}
+</news_hook>
+
+Rules for the hook: you only know the headline, not the article. Do not state any detail, number or quote beyond what the headline says. If the post needs more from the article, use a placeholder such as [DETAIL FROM ARTICLE] and list it. Do not name or criticise a specific skincare brand or company, even if the headline does; describe it generically ("a skincare brand", "one company"). Regulators, courts and research bodies can be named.`
     : '';
   return `Here is Meera's raw material for a LinkedIn post. Write the post.
 
 <raw_input>
 ${rawInput}
-</raw_input>${variationNote}`;
+</raw_input>${variationNote}${hookNote}`;
 }
 
 export function revisePrompt(rawInput, draft, feedback) {

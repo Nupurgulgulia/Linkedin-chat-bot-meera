@@ -2,6 +2,8 @@ import { createBot } from './bot.js';
 import { loadConfig } from './config.js';
 import { createGeminiClient } from './gemini.js';
 import { buildSystemInstruction } from './prompts.js';
+import { createHookFinder } from './hooks.js';
+import { fetchNews } from './news.js';
 import { createScorer } from './scoring.js';
 import { createWriter } from './writer.js';
 
@@ -14,6 +16,7 @@ export function createApp(config = loadConfig()) {
   });
   const writer = createWriter(gemini);
   const scorer = createScorer(gemini);
-  const bot = createBot({ token: config.telegramToken, allowedUserIds: config.allowedUserIds, writer, gemini, scorer });
+  const hookFinder = createHookFinder({ gemini, fetchNews });
+  const bot = createBot({ token: config.telegramToken, allowedUserIds: config.allowedUserIds, writer, gemini, scorer, hookFinder });
   return { bot, config };
 }

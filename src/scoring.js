@@ -56,7 +56,14 @@ ${verifiedFacts()}
 
 Return the scores, the gates triggered (empty list if none), and one sentence of
 reasoning. If the verdict is not "qualified", the reasoning should say what Meera could
-add to make it one.`;
+add to make it one.
+
+Also return:
+- core_point: the note's actual point in one plain sentence.
+- news_queries: 2 or 3 short news search queries (2 to 5 words each) that would find
+  recent news articles about the specific issue this note is about, for example
+  "niacinamide serum pH" or "CDSCO cosmetics labelling". Prefer specific ingredients,
+  regulations and events over generic words like "skincare".`;
 
 const SCORE_SCHEMA = {
   type: Type.OBJECT,
@@ -68,9 +75,11 @@ const SCORE_SCHEMA = {
     },
     gates_triggered: { type: Type.ARRAY, items: { type: Type.STRING } },
     reasoning: { type: Type.STRING },
+    core_point: { type: Type.STRING },
+    news_queries: { type: Type.ARRAY, items: { type: Type.STRING } },
   },
-  required: ['scores', 'gates_triggered', 'reasoning'],
-  propertyOrdering: ['scores', 'gates_triggered', 'reasoning'],
+  required: ['scores', 'gates_triggered', 'reasoning', 'core_point', 'news_queries'],
+  propertyOrdering: ['scores', 'gates_triggered', 'reasoning', 'core_point', 'news_queries'],
 };
 
 /** Weighted score (0-10, one decimal) and verdict, computed here rather than trusted to the model. */
@@ -93,7 +102,7 @@ export function computeVerdict(scores, gatesTriggered = []) {
 
 export function createScorer(gemini) {
   return {
-    /** Returns { scores, weighted_score, gates_triggered, verdict, reasoning }. */
+    /** Returns { scores, weighted_score, gates_triggered, verdict, reasoning, core_point, news_queries }. */
     async score(note) {
       const parsed = await gemini.generateJson(`<note>\n${note}\n</note>`, SCORE_SCHEMA, {
         temperature: 0,
@@ -107,6 +116,8 @@ export function createScorer(gemini) {
         gates_triggered: gates,
         verdict,
         reasoning: parsed.reasoning ?? '',
+        core_point: parsed.core_point ?? '',
+        news_queries: (parsed.news_queries ?? []).filter((q) => q?.trim()).slice(0, 3),
       };
     },
   };

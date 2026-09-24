@@ -23,6 +23,15 @@ Before drafting, every new note is scored by Gemini (`src/scoring.js`) on specif
 
 The scorer is given Section 5 of the voice guide, so Meera's own verified facts don't trip the fabrication gate. If scoring fails, the bot drafts anyway rather than blocking her.
 
+## News hooks
+
+When a note passes scoring, the scorer also returns its core point and two or three news search queries. The bot searches Google News (India edition, last 10 days, no API key needed, `src/news.js`) and keeps up to 8 headlines. Gemini scores each one on topical match (20%), angle fit (40%) and usability (25%), and rejects sources that aren't real news outlets. Recency (15%) is calculated from the publish date in code. The code then applies the weights and picks the winner (`src/hooks.js`).
+
+- **Best valid headline at 7.0 or more:** the post opens with it, and the notes give the link so Meera can read the article before posting.
+- **Otherwise:** the post is written without a hook, and the notes say why. It never forces a weak match.
+
+The writer only sees the headline, so it may not state anything from the article beyond the headline; extra detail becomes `[DETAIL FROM ARTICLE]`. It won't name a brand even if the headline does. If the news search fails, the post is written without a hook.
+
 ## Deploying on Vercel
 
 Requires Node.js 22 or newer locally.
@@ -72,6 +81,8 @@ src/index.js       Local mode: long polling
 src/config.js      Reads environment variables, derives the webhook secret
 src/bot.js         Telegram handlers: text, voice, buttons, commands
 src/scoring.js     Scores new notes before drafting
+src/news.js        Google News RSS search
+src/hooks.js       Picks a news hook for the post, or none
 src/writer.js      Draft, style-check, repair pipeline
 src/gemini.js      Gemini API calls (JSON output, transcription, retries)
 src/prompts.js     System instruction and per-request prompts

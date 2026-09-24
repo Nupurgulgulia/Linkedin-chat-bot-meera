@@ -1,5 +1,5 @@
 import { Bot, InlineKeyboard } from 'grammy';
-import { HELP_TEXT, formatNotes, formatRejection, formatScoreLine, splitMessage } from './messages.js';
+import { HELP_TEXT, formatHookLine, formatNotes, formatRejection, formatScoreLine, splitMessage } from './messages.js';
 import { PRESET_FEEDBACK, TRANSCRIBE_PROMPT } from './prompts.js';
 
 // The bot keeps no state between messages, so it can run on serverless functions.
@@ -39,7 +39,7 @@ function rawInputOf(draftMessage) {
   return source.text.startsWith(TRANSCRIPT_PREFIX) ? source.text.slice(TRANSCRIPT_PREFIX.length) : source.text;
 }
 
-export function createBot({ token, allowedUserIds, writer, gemini, scorer }) {
+export function createBot({ token, allowedUserIds, writer, gemini, scorer, hookFinder }) {
   const bot = new Bot(token);
 
   // Access control: only listed users can use the bot. /start always answers so a new
@@ -106,8 +106,23 @@ export function createBot({ token, allowedUserIds, writer, gemini, scorer }) {
         reply_markup: writeAnywayKeyboard,
       });
     }
-    return sendDraft(ctx, replyToId, () => writer.draft(rawInput), {
-      header: assessment ? formatScoreLine(assessment) : undefined,
+
+    // Look for a recent news article to open the post with. Optional: any failure
+    // just means the post is written without one.
+    let hookResult = null;
+    if (hookFinder && assessment?.core_point) {
+      try {
+        hookResult = await hookFinder.find(assessment.core_point, assessment.news_queries);
+      } catch (err) {
+        console.error('News hook search failed, drafting without one:', err);
+      }
+    }
+
+    const header = [assessment && formatScoreLine(assessment), hookResult && formatHookLine(hookResult)]
+      .filter(Boolean)
+      .join('\n\n');
+    return sendDraft(ctx, replyToId, () => writer.draft(rawInput, { hook: hookResult?.hook ?? null }), {
+      header: header || undefined,
     });
   }
 

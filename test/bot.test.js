@@ -8,11 +8,11 @@ const chat = { id: 42, type: 'private' };
 const draftMarkup = { inline_keyboard: [[{ text: 'Shorter', callback_data: 'act:shorter' }]] };
 
 // A bot wired to a fake writer and a fake Telegram API that records every call.
-function setup({ allowedUserIds = [], verdict } = {}) {
+function setup({ allowedUserIds = [], verdict, hookResult } = {}) {
   const writerCalls = [];
   const result = (post) => ({ post, placeholders: [], assumptions: [], questions: [], wordCount: 3, remainingIssues: [] });
   const writer = {
-    draft: async (raw) => (writerCalls.push({ fn: 'draft', raw }), result('Fresh draft.')),
+    draft: async (raw, opts) => (writerCalls.push(opts?.hook ? { fn: 'draft', raw, hook: opts.hook } : { fn: 'draft', raw }), result('Fresh draft.')),
     revise: async (raw, draft, feedback) => (writerCalls.push({ fn: 'revise', raw, draft, feedback }), result('Revised draft.')),
   };
   const scorer = verdict && {
@@ -22,9 +22,12 @@ function setup({ allowedUserIds = [], verdict } = {}) {
       gates_triggered: [],
       verdict,
       reasoning: 'Needs a number or mechanism.',
+      core_point: 'Label percentages mean little without pH.',
+      news_queries: ['niacinamide pH'],
     }),
   };
-  const bot = createBot({ token: '1:test', allowedUserIds, writer, gemini: {}, scorer });
+  const hookFinder = hookResult && { find: async () => hookResult };
+  const bot = createBot({ token: '1:test', allowedUserIds, writer, gemini: {}, scorer, hookFinder });
   bot.botInfo = { id: BOT_ID, is_bot: true, first_name: 'Bot', username: 'test_bot' };
 
   const apiCalls = [];
@@ -149,4 +152,23 @@ test('Write it anyway drafts from the notes the rejection replied to', async () 
     },
   });
   assert.deepEqual(writerCalls, [{ fn: 'draft', raw: 'labels are bad' }]);
+});
+
+test('a relevant news hook is passed to the writer and shown with its link', async () => {
+  const hook = { title: 'CDSCO tightens cosmetic label rules', link: 'https://news.example/a', source: 'The Hindu', published: '2026-09-22', weighted_score: 8.4, reasoning: 'Same labelling issue.' };
+  const { bot, writerCalls, sent } = setup({ verdict: 'qualified', hookResult: { candidates_evaluated: 5, hook } });
+  await bot.handleUpdate(message({ text: 'detailed notes' }));
+
+  assert.deepEqual(writerCalls[0].hook, hook);
+  const notes = sent()[1].text;
+  assert.match(notes, /News hook \(8\.4\/10\)/);
+  assert.match(notes, /https:\/\/news\.example\/a/);
+});
+
+test('when no hook qualifies, the post is written without one and the notes say so', async () => {
+  const { bot, writerCalls, sent } = setup({ verdict: 'qualified', hookResult: { candidates_evaluated: 6, hook: null, reasoning_if_null: 'Nothing on pH.' } });
+  await bot.handleUpdate(message({ text: 'detailed notes' }));
+
+  assert.equal(writerCalls[0].hook, undefined);
+  assert.match(sent()[1].text, /No news hook used \(6 recent articles checked\)\. Nothing on pH\./);
 });

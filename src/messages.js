@@ -38,6 +38,15 @@ export function formatScoreLine(assessment) {
   return assessment.verdict === 'qualified' ? line : `${line} ${assessment.reasoning}`;
 }
 
+/** Says which news article the post opens with, or that none was relevant enough. */
+export function formatHookLine(result) {
+  if (result.hook) {
+    const h = result.hook;
+    return `News hook (${h.weighted_score}/10): "${h.title}", ${h.source}, ${h.published}. ${h.reasoning} Read it before posting: ${h.link}`;
+  }
+  return `No news hook used (${result.candidates_evaluated} recent articles checked). ${result.reasoning_if_null}`;
+}
+
 /** Explains why a note was not turned into a post. */
 export function formatRejection(assessment) {
   const lines = [`I haven't written a post from this yet. Note score: ${assessment.weighted_score}/10.`];
