@@ -56,7 +56,9 @@ const AMERICAN_SPELLINGS = {
   fiber: 'fibre',
 };
 
-const EMOJI = /\p{Extended_Pictographic}/u;
+const LINKEDIN_LIMIT = 3000;
+
+const EMOJI =/\p{Extended_Pictographic}/u;
 const HASHTAG = /(^|\s)#[\p{L}\d_]+/u;
 
 export function countWords(text) {
@@ -72,6 +74,9 @@ export function checkStyle(text) {
   const issues = [];
   const lower = text.toLowerCase();
 
+  if (text.length > LINKEDIN_LIMIT) {
+    issues.push(`Is ${text.length} characters; LinkedIn's limit is ${LINKEDIN_LIMIT}. Shorten it to under 2,800 characters by cutting secondary points.`);
+  }
   if (/[—–]/.test(text)) issues.push('Contains em dashes or en dashes. Rewrite those sentences with full stops, commas, colons or parentheses.');
   if (text.includes('!')) issues.push('Contains exclamation marks. Remove them.');
   if (EMOJI.test(text)) issues.push('Contains emojis. Remove them.');

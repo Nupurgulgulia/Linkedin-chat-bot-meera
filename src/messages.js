@@ -54,10 +54,10 @@ You can send:
 - A voice note with your thoughts
 - Anything you'd like to react to, pasted in with your take
 
-Under each draft you can ask for a new version, a shorter one, a simpler or more technical one, or tap "Give feedback" and tell me what to change. You can also reply directly to a draft with feedback.
+Under each draft you can ask for a new version, a shorter one, or a simpler or more technical one. To change anything else, reply to the draft (swipe left on it) and tell me what to change.
 
 If a draft has [PLACEHOLDERS], it needs a fact from you. Reply to the draft with the facts and I'll put them in.
 
-Commands:
-/new - start fresh (forget the current draft)
+Any message that isn't a reply to a draft starts a new post.
+
 /help - show this message`;

@@ -1,3 +1,13 @@
+import { createHash } from 'node:crypto';
+
+/**
+ * Secret Telegram sends with every webhook call, derived from the bot token so no extra
+ * setting is needed: anyone who can compute it already controls the bot.
+ */
+export function webhookSecret(token) {
+  return createHash('sha256').update(`telegram-webhook:${token}`).digest('hex');
+}
+
 function required(name) {
   const value = process.env[name]?.trim();
   if (!value) {

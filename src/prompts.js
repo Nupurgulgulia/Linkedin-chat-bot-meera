@@ -22,7 +22,7 @@ Everything about how Meera writes is defined in the VOICE GUIDE below. Follow it
 
 ## Your job in this bot
 
-1. The task is always a LinkedIn post (Section 4 of the voice guide: 300-550 words, full paragraphs, specific opening, mechanism, one fairness paragraph, a close that gives the reader something to ask or understand). If Meera explicitly asks for a different length or angle in her raw input, follow her.
+1. The task is always a LinkedIn post (Section 4 of the voice guide, full paragraphs, specific opening, mechanism, one fairness paragraph, a close that gives the reader something to ask or understand). LinkedIn cuts posts off at 3,000 characters, so keep the post under 2,800 characters including spaces, which usually means 300-450 words. If Meera explicitly asks for a different length or angle in her raw input, follow her, within that limit.
 2. Use only facts that appear in Meera's raw input or in Section 5 of the voice guide. Do not invent stories, numbers, customer reactions, study results, product details or credentials.
 3. When the post needs a fact you don't have, put a square-bracket placeholder in the post, like [CONCENTRATION] or [MONTH AND YEAR], and list it in "placeholders" with what Meera needs to fill in. Prefer a good post with two or three placeholders over a vague post with none.
 4. If her raw input contains a claim you think is wrong, overstated or unsupported, do not silently fix or strengthen it. Keep her meaning, and raise the concern in "assumptions".
@@ -51,13 +51,12 @@ ${rawInput}
 }
 
 export function revisePrompt(rawInput, draft, feedback) {
-  return `Revise Meera's LinkedIn post draft based on her feedback. Keep everything that already works, change what she asks for, and keep every rule in the voice guide. Do not introduce facts that are not in the raw material or Section 5.
+  const rawBlock = rawInput
+    ? `<raw_input>\n${rawInput}\n</raw_input>\n\n`
+    : '(The original raw material is not available. Treat the facts in the current draft and in the feedback as the raw material.)\n\n';
+  return `Revise Meera's LinkedIn post draft based on her feedback. Keep everything that already works, change what she asks for, and keep every rule in the voice guide. Do not introduce facts that are not in the raw material, the draft, her feedback or Section 5. If her feedback supplies a fact for a [PLACEHOLDER], replace the placeholder with it.
 
-<raw_input>
-${rawInput}
-</raw_input>
-
-<current_draft>
+${rawBlock}<current_draft>
 ${draft}
 </current_draft>
 
@@ -82,6 +81,7 @@ export const TRANSCRIBE_PROMPT =
 
 // Preset revisions offered as buttons under each draft.
 export const PRESET_FEEDBACK = {
+  regen: 'Write a substantially different version of this post from the same material: a different opening and, if the material allows, a different angle or structure. Same facts, same rules.',
   shorter: 'Make it noticeably shorter, around 200-300 words. Keep the specific opening, the core mechanism and the close. Cut secondary points first.',
   simpler: 'Make it easier for a non-specialist to follow. Keep the technical terms but explain each one in plain words the first time it appears. Keep the precision.',
   technical: 'Go one level more technical for an audience of formulators and other founders. More mechanism and more specifics, but only using facts already available. Add placeholders for any figure you would need.',

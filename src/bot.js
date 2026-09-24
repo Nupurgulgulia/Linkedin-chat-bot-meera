@@ -2,16 +2,14 @@ import { Bot, InlineKeyboard } from 'grammy';
 import { HELP_TEXT, formatNotes, splitMessage } from './messages.js';
 import { PRESET_FEEDBACK, TRANSCRIBE_PROMPT } from './prompts.js';
 
-// One conversation per chat, kept in memory. A restart forgets drafts, which is fine
-// for a single-user bot: Meera just sends the raw material again.
-const sessions = new Map();
+// The bot keeps no state between messages, so it can run on serverless functions.
+// Everything it needs travels with Telegram's messages:
+// - Each draft is sent as a reply to Meera's raw material, so a button press on the
+//   draft carries both the draft (the message text) and the raw material (the message
+//   it replies to).
+// - Feedback is given by replying to a draft, which carries the draft text.
 
-function getSession(chatId) {
-  if (!sessions.has(chatId)) {
-    sessions.set(chatId, { rawInput: null, draft: null, draftMessageIds: [], awaitingFeedback: false, busy: false });
-  }
-  return sessions.get(chatId);
-}
+const TRANSCRIPT_PREFIX = 'What I heard:\n\n';
 
 const draftKeyboard = new InlineKeyboard()
   .text('New version', 'act:regen')
@@ -21,6 +19,22 @@ const draftKeyboard = new InlineKeyboard()
   .text('More technical', 'act:technical')
   .row()
   .text('Give feedback', 'act:feedback');
+
+/** True if the message is a draft this bot sent (it carries the draft buttons). */
+function isDraft(message, botId) {
+  return (
+    message?.from?.id === botId &&
+    Boolean(message.text) &&
+    message.reply_markup?.inline_keyboard?.some((row) => row.some((b) => b.callback_data?.startsWith('act:')))
+  );
+}
+
+/** Recovers Meera's raw material from the message a draft replies to, if available. */
+function rawInputOf(draftMessage) {
+  const source = draftMessage.reply_to_message;
+  if (!source?.text) return null;
+  return source.text.startsWith(TRANSCRIPT_PREFIX) ? source.text.slice(TRANSCRIPT_PREFIX.length) : source.text;
+}
 
 export function createBot({ token, allowedUserIds, writer, gemini }) {
   const bot = new Bot(token);
@@ -39,71 +53,51 @@ export function createBot({ token, allowedUserIds, writer, gemini }) {
     ctx.reply(`Hi Meera. ${HELP_TEXT}\n\n(Your Telegram user ID is ${ctx.from.id}.)`),
   );
   bot.command('help', (ctx) => ctx.reply(HELP_TEXT));
-  bot.command('new', (ctx) => {
-    sessions.delete(ctx.chat.id);
-    return ctx.reply('Cleared. Send me the raw material for the next post.');
-  });
 
-  /** Runs one generation with a typing indicator, one-at-a-time per chat, and sends the result. */
-  async function runJob(ctx, session, job, { transcript } = {}) {
-    if (session.busy) {
-      await ctx.reply("I'm still working on the last one. Give me a moment.");
-      return;
-    }
-    session.busy = true;
-    session.awaitingFeedback = false;
+  /**
+   * Runs one generation with a typing indicator and sends the draft as a reply to
+   * `replyToId` (Meera's raw material, so later button presses can recover it).
+   */
+  async function sendDraft(ctx, replyToId, job) {
     await ctx.replyWithChatAction('typing');
     const typing = setInterval(() => ctx.replyWithChatAction('typing').catch(() => {}), 4500);
-
     try {
       const result = await job();
-      session.draft = result.post;
-
-      // The post goes in its own message(s) so Meera can copy it cleanly.
+      // The post goes in its own message so Meera can copy it cleanly. Posts are kept
+      // under LinkedIn's 3,000 character limit, so this is almost always one message.
       const chunks = splitMessage(result.post);
-      session.draftMessageIds = [];
       for (const [i, chunk] of chunks.entries()) {
         const isLast = i === chunks.length - 1;
-        const sent = await ctx.reply(chunk, isLast ? { reply_markup: draftKeyboard } : {});
-        session.draftMessageIds.push(sent.message_id);
+        await ctx.reply(chunk, {
+          reply_parameters: { message_id: replyToId, allow_sending_without_reply: true },
+          ...(isLast ? { reply_markup: draftKeyboard } : {}),
+        });
       }
-      await ctx.reply(formatNotes(result, { transcript }));
+      await ctx.reply(formatNotes(result));
     } catch (err) {
       console.error('Generation failed:', err);
       await ctx.reply(`Sorry, something went wrong while writing that (${err.message}). Please try again.`);
     } finally {
       clearInterval(typing);
-      session.busy = false;
     }
   }
 
-  function startNewPost(ctx, rawInput, options) {
-    const session = getSession(ctx.chat.id);
-    session.rawInput = rawInput;
-    session.draft = null;
-    return runJob(ctx, session, () => writer.draft(rawInput), options);
-  }
-
-  function reviseCurrent(ctx, feedback) {
-    const session = getSession(ctx.chat.id);
-    // Keep the facts she supplies in feedback, so later revisions and new versions can use them.
-    session.rawInput = `${session.rawInput}\n\nAdditional notes from Meera:\n${feedback}`;
-    const { rawInput, draft } = session;
-    return runJob(ctx, session, () => writer.revise(rawInput, draft, feedback));
+  async function handleInput(ctx, text) {
+    const repliedTo = ctx.message.reply_to_message;
+    if (isDraft(repliedTo, ctx.me.id)) {
+      // Feedback on a draft. The raw material isn't available here (Telegram only
+      // includes one level of reply), but the draft already contains its facts.
+      return sendDraft(ctx, ctx.message.message_id, () =>
+        writer.revise(rawInputOf(repliedTo), repliedTo.text, text),
+      );
+    }
+    return sendDraft(ctx, ctx.message.message_id, () => writer.draft(text));
   }
 
   bot.on('message:text', async (ctx) => {
     const text = ctx.message.text.trim();
-    if (text.startsWith('/')) return ctx.reply('I don\'t know that command. Send /help to see what I can do.');
-
-    const session = getSession(ctx.chat.id);
-    const repliedTo = ctx.message.reply_to_message?.message_id;
-    const isReplyToDraft = repliedTo && session.draftMessageIds.includes(repliedTo);
-
-    if (session.draft && (session.awaitingFeedback || isReplyToDraft)) {
-      return reviseCurrent(ctx, text);
-    }
-    return startNewPost(ctx, text);
+    if (text.startsWith('/')) return ctx.reply("I don't know that command. Send /help to see what I can do.");
+    return handleInput(ctx, text);
   });
 
   bot.on(['message:voice', 'message:audio'], async (ctx) => {
@@ -125,38 +119,37 @@ export function createBot({ token, allowedUserIds, writer, gemini }) {
       return ctx.reply(`I couldn't process that voice note (${err.message}). Could you try again or type it out?`);
     }
 
-    const session = getSession(ctx.chat.id);
-    const repliedTo = ctx.message.reply_to_message?.message_id;
-    if (session.draft && (session.awaitingFeedback || session.draftMessageIds.includes(repliedTo))) {
-      return reviseCurrent(ctx, transcript);
+    const repliedTo = ctx.message.reply_to_message;
+    if (isDraft(repliedTo, ctx.me.id)) {
+      return sendDraft(ctx, ctx.message.message_id, () =>
+        writer.revise(rawInputOf(repliedTo), repliedTo.text, transcript),
+      );
     }
-    return startNewPost(ctx, transcript, { transcript });
+    // Show the transcript as its own message and reply to it with the draft, so the
+    // transcript is the raw material that later button presses recover.
+    const shown = await ctx.reply(`${TRANSCRIPT_PREFIX}${transcript}`.slice(0, 4000), {
+      reply_parameters: { message_id: ctx.message.message_id, allow_sending_without_reply: true },
+    });
+    return sendDraft(ctx, shown.message_id, () => writer.draft(transcript));
   });
 
   bot.callbackQuery(/^act:(\w+)$/, async (ctx) => {
     const action = ctx.match[1];
-    const session = getSession(ctx.chat.id);
-
-    if (!session.rawInput || !session.draft) {
-      await ctx.answerCallbackQuery();
-      return ctx.reply('That draft has expired (the bot was restarted). Send me the raw material again.');
-    }
+    const draftMessage = ctx.callbackQuery.message;
 
     if (action === 'feedback') {
-      session.awaitingFeedback = true;
       await ctx.answerCallbackQuery();
-      return ctx.reply('What should I change? Type it or send a voice note.');
+      return ctx.reply('Reply to the draft (swipe left on it, or long-press and tap Reply) and tell me what to change. Typing or a voice note both work.');
+    }
+    if (!draftMessage?.text || !PRESET_FEEDBACK[action]) {
+      return ctx.answerCallbackQuery({ text: "I can't read that draft any more. Send the raw material again." });
     }
 
     await ctx.answerCallbackQuery({ text: 'On it' });
-    if (action === 'regen') {
-      const { rawInput } = session;
-      return runJob(ctx, session, () => writer.draft(rawInput, { variation: true }));
-    }
-    if (PRESET_FEEDBACK[action]) {
-      const { rawInput, draft } = session;
-      return runJob(ctx, session, () => writer.revise(rawInput, draft, PRESET_FEEDBACK[action]));
-    }
+    const rawInput = rawInputOf(draftMessage);
+    // Keep replying to the original raw material so the chain stays intact.
+    const replyToId = draftMessage.reply_to_message?.message_id ?? draftMessage.message_id;
+    return sendDraft(ctx, replyToId, () => writer.revise(rawInput, draftMessage.text, PRESET_FEEDBACK[action]));
   });
 
   bot.on('message', (ctx) =>

@@ -2,7 +2,7 @@
   "name": "meera-linkedin-bot",
   "version": "1.0.0",
   "private": true,
-  "description": "Telegram bot that turns Meera Pillai's raw notes and voice memos into ready-to-post LinkedIn posts, using Gemini.",
+  "description": "Telegram bot that turns Meera Pillai's raw notes and voice memos into ready-to-post LinkedIn posts, using Gemini. Runs on Vercel.",
   "type": "module",
   "main": "src/index.js",
   "engines": {
@@ -11,10 +11,12 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env src/index.js",
     "dev": "node --watch --env-file-if-exists=.env src/index.js",
+    "set-webhook": "node --env-file-if-exists=.env scripts/set-webhook.js",
     "test": "node --test"
   },
   "dependencies": {
     "@google/genai": "^1.0.0",
+    "@vercel/functions": "^3.9.9",
     "grammy": "^1.30.0"
   }
 }
