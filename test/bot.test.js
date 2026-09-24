@@ -8,14 +8,23 @@ const chat = { id: 42, type: 'private' };
 const draftMarkup = { inline_keyboard: [[{ text: 'Shorter', callback_data: 'act:shorter' }]] };
 
 // A bot wired to a fake writer and a fake Telegram API that records every call.
-function setup({ allowedUserIds = [] } = {}) {
+function setup({ allowedUserIds = [], verdict } = {}) {
   const writerCalls = [];
   const result = (post) => ({ post, placeholders: [], assumptions: [], questions: [], wordCount: 3, remainingIssues: [] });
   const writer = {
     draft: async (raw) => (writerCalls.push({ fn: 'draft', raw }), result('Fresh draft.')),
     revise: async (raw, draft, feedback) => (writerCalls.push({ fn: 'revise', raw, draft, feedback }), result('Revised draft.')),
   };
-  const bot = createBot({ token: '1:test', allowedUserIds, writer, gemini: {} });
+  const scorer = verdict && {
+    score: async () => ({
+      scores: { specificity: 2, mechanism_depth: 2, verifiability: 5, raw_material: 2, fairness_risk: 10 },
+      weighted_score: verdict === 'rejected' ? 3.5 : 7.5,
+      gates_triggered: [],
+      verdict,
+      reasoning: 'Needs a number or mechanism.',
+    }),
+  };
+  const bot = createBot({ token: '1:test', allowedUserIds, writer, gemini: {}, scorer });
   bot.botInfo = { id: BOT_ID, is_bot: true, first_name: 'Bot', username: 'test_bot' };
 
   const apiCalls = [];
@@ -103,4 +112,41 @@ test('users not on the allow list are ignored', async () => {
   await bot.handleUpdate(message({ text: 'my raw notes' }));
   assert.equal(writerCalls.length, 0);
   assert.equal(sent().length, 0);
+});
+
+test('a rejected note gets an explanation and a Write it anyway button, not a draft', async () => {
+  const { bot, writerCalls, sent } = setup({ verdict: 'rejected' });
+  await bot.handleUpdate(message({ text: 'labels are bad' }));
+
+  assert.equal(writerCalls.length, 0);
+  const [reply] = sent();
+  assert.match(reply.text, /3\.5\/10/);
+  assert.match(reply.text, /Needs a number or mechanism/);
+  assert.equal(reply.reply_parameters.message_id, 10);
+  assert.equal(reply.reply_markup.inline_keyboard[0][0].callback_data, 'score:force');
+});
+
+test('a qualified note is drafted with the score in the notes', async () => {
+  const { bot, writerCalls, sent } = setup({ verdict: 'qualified' });
+  await bot.handleUpdate(message({ text: 'detailed notes' }));
+
+  assert.equal(writerCalls[0].fn, 'draft');
+  assert.match(sent()[1].text, /Note score: 7\.5\/10 \(qualified\)/);
+});
+
+test('Write it anyway drafts from the notes the rejection replied to', async () => {
+  const { bot, writerCalls } = setup({ verdict: 'rejected' });
+  await bot.handleUpdate({
+    update_id: updateId++,
+    callback_query: {
+      id: 'cb3', from: MEERA, chat_instance: 'x', data: 'score:force',
+      message: {
+        message_id: 70, date: 0, chat, from: { id: BOT_ID, is_bot: true, first_name: 'Bot' },
+        text: "I haven't written a post from this yet.",
+        reply_markup: { inline_keyboard: [[{ text: 'Write it anyway', callback_data: 'score:force' }]] },
+        reply_to_message: { message_id: 10, date: 0, chat, from: MEERA, text: 'labels are bad' },
+      },
+    },
+  });
+  assert.deepEqual(writerCalls, [{ fn: 'draft', raw: 'labels are bad' }]);
 });

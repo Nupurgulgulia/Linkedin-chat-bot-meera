@@ -18,13 +18,41 @@ export function splitMessage(text, limit = TELEGRAM_LIMIT) {
 }
 
 /** The notes that go with a draft: word count, placeholders, assumptions, questions. */
-export function formatNotes(result, { transcript } = {}) {
-  const lines = [`${result.wordCount} words.`];
+const SCORE_LABELS = {
+  specificity: 'Specificity',
+  mechanism_depth: 'Mechanism',
+  verifiability: 'Verifiability',
+  raw_material: 'Raw material',
+  fairness_risk: 'Fairness',
+};
 
-  if (transcript) {
-    const preview = transcript.length > 300 ? `${transcript.slice(0, 300)}...` : transcript;
-    lines.push('', `What I heard: "${preview}"`);
+function scoreBreakdown(assessment) {
+  return Object.entries(SCORE_LABELS)
+    .map(([key, label]) => `${label} ${assessment.scores?.[key] ?? '?'}`)
+    .join(' · ');
+}
+
+/** One-line summary shown above the notes for a note that was drafted. */
+export function formatScoreLine(assessment) {
+  const line = `Note score: ${assessment.weighted_score}/10 (${assessment.verdict}).`;
+  return assessment.verdict === 'qualified' ? line : `${line} ${assessment.reasoning}`;
+}
+
+/** Explains why a note was not turned into a post. */
+export function formatRejection(assessment) {
+  const lines = [`I haven't written a post from this yet. Note score: ${assessment.weighted_score}/10.`];
+  if (assessment.gates_triggered.length > 0) {
+    lines.push('', 'Stopped by a hard rule:');
+    for (const gate of assessment.gates_triggered) lines.push(`- ${gate}`);
   }
+  lines.push('', assessment.reasoning, '', scoreBreakdown(assessment));
+  lines.push('', 'Send the notes again with more detail, or tap "Write it anyway".');
+  return lines.join('\n');
+}
+
+export function formatNotes(result, { header } = {}) {
+  const lines = header ? [header, '', `${result.wordCount} words.`] : [`${result.wordCount} words.`];
+
   if (result.placeholders.length > 0) {
     lines.push('', "Fill these in before posting (or reply to the draft with the facts and I'll put them in):");
     for (const p of result.placeholders) lines.push(`- ${p.placeholder}: ${p.needed}`);

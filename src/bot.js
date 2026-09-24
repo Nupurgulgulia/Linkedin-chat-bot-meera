@@ -1,5 +1,5 @@
 import { Bot, InlineKeyboard } from 'grammy';
-import { HELP_TEXT, formatNotes, splitMessage } from './messages.js';
+import { HELP_TEXT, formatNotes, formatRejection, formatScoreLine, splitMessage } from './messages.js';
 import { PRESET_FEEDBACK, TRANSCRIBE_PROMPT } from './prompts.js';
 
 // The bot keeps no state between messages, so it can run on serverless functions.
@@ -20,6 +20,9 @@ const draftKeyboard = new InlineKeyboard()
   .row()
   .text('Give feedback', 'act:feedback');
 
+// Uses a different prefix from the draft buttons so a rejection is never mistaken for a draft.
+const writeAnywayKeyboard = new InlineKeyboard().text('Write it anyway', 'score:force');
+
 /** True if the message is a draft this bot sent (it carries the draft buttons). */
 function isDraft(message, botId) {
   return (
@@ -36,7 +39,7 @@ function rawInputOf(draftMessage) {
   return source.text.startsWith(TRANSCRIPT_PREFIX) ? source.text.slice(TRANSCRIPT_PREFIX.length) : source.text;
 }
 
-export function createBot({ token, allowedUserIds, writer, gemini }) {
+export function createBot({ token, allowedUserIds, writer, gemini, scorer }) {
   const bot = new Bot(token);
 
   // Access control: only listed users can use the bot. /start always answers so a new
@@ -58,7 +61,7 @@ export function createBot({ token, allowedUserIds, writer, gemini }) {
    * Runs one generation with a typing indicator and sends the draft as a reply to
    * `replyToId` (Meera's raw material, so later button presses can recover it).
    */
-  async function sendDraft(ctx, replyToId, job) {
+  async function sendDraft(ctx, replyToId, job, { header } = {}) {
     await ctx.replyWithChatAction('typing');
     const typing = setInterval(() => ctx.replyWithChatAction('typing').catch(() => {}), 4500);
     try {
@@ -73,13 +76,39 @@ export function createBot({ token, allowedUserIds, writer, gemini }) {
           ...(isLast ? { reply_markup: draftKeyboard } : {}),
         });
       }
-      await ctx.reply(formatNotes(result));
+      await ctx.reply(formatNotes(result, { header }));
     } catch (err) {
       console.error('Generation failed:', err);
       await ctx.reply(`Sorry, something went wrong while writing that (${err.message}). Please try again.`);
     } finally {
       clearInterval(typing);
     }
+  }
+
+  /**
+   * Scores new raw material and drafts a post only if it has enough substance. Rejected
+   * notes get an explanation and a "Write it anyway" button instead. If scoring itself
+   * fails, draft anyway rather than block Meera.
+   */
+  async function startNewPost(ctx, rawInput, replyToId) {
+    let assessment = null;
+    if (scorer) {
+      await ctx.replyWithChatAction('typing');
+      try {
+        assessment = await scorer.score(rawInput);
+      } catch (err) {
+        console.error('Scoring failed, drafting anyway:', err);
+      }
+    }
+    if (assessment?.verdict === 'rejected') {
+      return ctx.reply(formatRejection(assessment), {
+        reply_parameters: { message_id: replyToId, allow_sending_without_reply: true },
+        reply_markup: writeAnywayKeyboard,
+      });
+    }
+    return sendDraft(ctx, replyToId, () => writer.draft(rawInput), {
+      header: assessment ? formatScoreLine(assessment) : undefined,
+    });
   }
 
   async function handleInput(ctx, text) {
@@ -91,7 +120,7 @@ export function createBot({ token, allowedUserIds, writer, gemini }) {
         writer.revise(rawInputOf(repliedTo), repliedTo.text, text),
       );
     }
-    return sendDraft(ctx, ctx.message.message_id, () => writer.draft(text));
+    return startNewPost(ctx, text, ctx.message.message_id);
   }
 
   bot.on('message:text', async (ctx) => {
@@ -130,7 +159,19 @@ export function createBot({ token, allowedUserIds, writer, gemini }) {
     const shown = await ctx.reply(`${TRANSCRIPT_PREFIX}${transcript}`.slice(0, 4000), {
       reply_parameters: { message_id: ctx.message.message_id, allow_sending_without_reply: true },
     });
-    return sendDraft(ctx, shown.message_id, () => writer.draft(transcript));
+    return startNewPost(ctx, transcript, shown.message_id);
+  });
+
+  bot.callbackQuery('score:force', async (ctx) => {
+    const message = ctx.callbackQuery.message;
+    const rawInput = message && rawInputOf(message);
+    if (!rawInput) {
+      return ctx.answerCallbackQuery({ text: "I can't find the original notes any more. Send them again." });
+    }
+    await ctx.answerCallbackQuery({ text: 'On it' });
+    return sendDraft(ctx, message.reply_to_message.message_id, () => writer.draft(rawInput), {
+      header: 'Written on request, although the note scored low. Check it carefully before posting.',
+    });
   });
 
   bot.callbackQuery(/^act:(\w+)$/, async (ctx) => {

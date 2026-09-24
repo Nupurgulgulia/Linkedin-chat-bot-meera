@@ -12,6 +12,14 @@ function stripFrontmatter(text) {
   return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
 }
 
+/** Section 5 of the voice guide: the facts about Meera and Skinstinct that are verified. */
+export function verifiedFacts() {
+  const guide = readPrompt('meera-voice.md');
+  const match = guide.match(/^## 5\.[\s\S]*?(?=^---\s*$|^## 6\.)/m);
+  if (!match) throw new Error('Could not find Section 5 (verified facts) in prompts/meera-voice.md');
+  return match[0].trim();
+}
+
 export function buildSystemInstruction() {
   const voiceGuide = stripFrontmatter(readPrompt('meera-voice.md'));
   const corpus = readPrompt('corpus.md');

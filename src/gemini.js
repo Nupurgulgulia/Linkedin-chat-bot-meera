@@ -50,27 +50,30 @@ async function withRetry(fn, attempts = 3) {
 export function createGeminiClient({ apiKey, model, systemInstruction }) {
   const ai = new GoogleGenAI({ apiKey });
 
-  /** Sends a prompt and returns the parsed { post, placeholders, assumptions, questions }. */
-  async function generatePost(prompt, { temperature = 0.7 } = {}) {
+  /** Sends a prompt and returns the response parsed against `schema`. */
+  async function generateJson(prompt, schema, { temperature, system = systemInstruction } = {}) {
     const response = await withRetry(() =>
       ai.models.generateContent({
         model,
         contents: prompt,
         config: {
-          systemInstruction,
+          systemInstruction: system,
           temperature,
           responseMimeType: 'application/json',
-          responseSchema: POST_SCHEMA,
+          responseSchema: schema,
         },
       }),
     );
-
-    let parsed;
     try {
-      parsed = JSON.parse(response.text ?? '');
+      return JSON.parse(response.text ?? '');
     } catch {
       throw new Error('Gemini returned a response that was not valid JSON.');
     }
+  }
+
+  /** Sends a prompt and returns the parsed { post, placeholders, assumptions, questions }. */
+  async function generatePost(prompt, { temperature = 0.7 } = {}) {
+    const parsed = await generateJson(prompt, POST_SCHEMA, { temperature });
     if (!parsed.post?.trim()) throw new Error('Gemini returned an empty post.');
 
     return {
@@ -103,5 +106,5 @@ export function createGeminiClient({ apiKey, model, systemInstruction }) {
     return text;
   }
 
-  return { generatePost, transcribe };
+  return { generateJson, generatePost, transcribe };
 }

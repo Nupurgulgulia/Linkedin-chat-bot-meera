@@ -13,6 +13,16 @@ A Telegram bot that turns Meera Pillai's raw notes and voice memos into ready-to
 
 The bot never invents stories, numbers or claims. Missing facts become placeholders.
 
+## Note scoring
+
+Before drafting, every new note is scored by Gemini (`src/scoring.js`) on specificity (25%), mechanism depth (20%), verifiability (15%), raw material (10%) and fairness risk (10%). The weights are rescaled to add up to 100%, so scores run from 0 to 10. The weighted score and verdict are calculated in code, not by the model.
+
+- **7.0 or more, qualified:** the post is drafted and the score is shown in the notes.
+- **4.5 to 6.9, borderline:** the post is drafted, with a warning saying what's missing.
+- **Below 4.5, or any hard gate** (names a competitor, makes a medical or diagnostic claim, states an unverifiable "fact"): no draft. Meera sees why and gets a **Write it anyway** button.
+
+The scorer is given Section 5 of the voice guide, so Meera's own verified facts don't trip the fabrication gate. If scoring fails, the bot drafts anyway rather than blocking her.
+
 ## Deploying on Vercel
 
 Requires Node.js 22 or newer locally.
@@ -61,6 +71,7 @@ src/app.js         Wires config, Gemini, writer and bot together
 src/index.js       Local mode: long polling
 src/config.js      Reads environment variables, derives the webhook secret
 src/bot.js         Telegram handlers: text, voice, buttons, commands
+src/scoring.js     Scores new notes before drafting
 src/writer.js      Draft, style-check, repair pipeline
 src/gemini.js      Gemini API calls (JSON output, transcription, retries)
 src/prompts.js     System instruction and per-request prompts
